@@ -1,0 +1,8 @@
+biomes:
+  - minemagic:astral_mushrooms
+WhiteListBlocks:
+  - GRASS_BLOCK
+threshold: 0.9
+scale: 0.06
+distance: 12
+world: "world"
