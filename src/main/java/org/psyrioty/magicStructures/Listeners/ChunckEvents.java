@@ -53,6 +53,30 @@ public class ChunckEvents implements Listener {
                 lootTableKey = "minecraft:chests/simple_dungeon";
             }
 
+            boolean surface = config.getBoolean("surface");
+            if(!surface){
+                int minY = config.getInt("minY");
+                int maxY = config.getInt("maxY");
+
+                structurePlacer.populate(
+                        world,
+                        event.getChunk(),
+                        scale,
+                        threshold,
+                        whiteListBiomesString,
+                        whiteListBlocksString,
+                        fileName,
+                        distance,
+                        seed,
+                        !notReplaceAir,
+                        lootTableKey,
+                        minY,
+                        maxY
+                );
+
+                continue;
+            }
+
             structurePlacer.populate(
                     world,
                     event.getChunk(),
@@ -63,8 +87,9 @@ public class ChunckEvents implements Listener {
                     fileName,
                     distance,
                     seed,
-                    notReplaceAir,
-                    lootTableKey
+                    !notReplaceAir,
+                    lootTableKey,
+                    surface
             );
         }
     }

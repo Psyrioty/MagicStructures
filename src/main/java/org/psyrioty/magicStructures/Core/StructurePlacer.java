@@ -10,8 +10,10 @@ import com.sk89q.worldedit.world.block.BaseBlock;
 import io.lumine.mythic.api.exceptions.InvalidMobTypeException;
 import io.lumine.mythic.bukkit.MythicBukkit;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import net.md_5.bungee.api.chat.ComponentBuilder;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.Material;
@@ -19,10 +21,13 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.Sign;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.block.sign.Side;
 import org.bukkit.block.sign.SignSide;
+import org.bukkit.block.structure.StructureRotation;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Player;
 import org.bukkit.loot.LootTable;
 import org.bukkit.loot.Lootable;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -43,6 +48,11 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class StructurePlacer {
 
+    private enum PlacementMode {
+        SURFACE,
+        RANGE
+    }
+
     private final Set<String> placedStructures = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, Clipboard> cache = new ConcurrentHashMap<>();
 
@@ -52,7 +62,44 @@ public class StructurePlacer {
                          List<String> biomes, List<String> blocks,
                          String fileName, int distance, long seed,
                          boolean notReplaceAir,
-                         String lootTableKey) {
+                         String lootTableKey,
+                         boolean surface) {
+
+        populateInternal(
+                world, chunk, scale, threshold,
+                biomes, blocks, fileName, distance, seed,
+                notReplaceAir, lootTableKey,
+                surface ? PlacementMode.SURFACE : PlacementMode.RANGE,
+                world != null ? world.getMinHeight() : 0,
+                world != null ? world.getMaxHeight() - 1 : 319
+        );
+    }
+
+    public void populate(World world, Chunk chunk, double scale, double threshold,
+                         List<String> biomes, List<String> blocks,
+                         String fileName, int distance, long seed,
+                         boolean notReplaceAir,
+                         String lootTableKey,
+                         int minY, int maxY) {
+
+        populateInternal(
+                world, chunk, scale, threshold,
+                biomes, blocks, fileName, distance, seed,
+                notReplaceAir, lootTableKey,
+                PlacementMode.RANGE,
+                minY,
+                maxY
+        );
+    }
+
+    private void populateInternal(World world, Chunk chunk, double scale, double threshold,
+                                  List<String> biomes, List<String> blocks,
+                                  String fileName, int distance, long seed,
+                                  boolean notReplaceAir,
+                                  String lootTableKey,
+                                  PlacementMode mode,
+                                  int minY,
+                                  int maxY) {
 
         if (world == null || chunk == null || fileName == null || fileName.isBlank() || distance <= 0) {
             return;
@@ -73,7 +120,13 @@ public class StructurePlacer {
                 double normalized = (noise + 1.0) * 0.5;
 
                 if (normalized > threshold) {
-                    scheduleStructure(world, worldX, worldZ, biomes, blocks, fileName, seed, notReplaceAir, lootTableKey);
+                    scheduleStructure(
+                            world, worldX, worldZ,
+                            biomes, blocks,
+                            fileName, seed,
+                            notReplaceAir, lootTableKey,
+                            mode, minY, maxY
+                    );
                 }
             }
         }
@@ -85,14 +138,17 @@ public class StructurePlacer {
                                    String name,
                                    long seed,
                                    boolean notReplaceAir,
-                                   String lootTableKey) {
+                                   String lootTableKey,
+                                   PlacementMode mode,
+                                   int minY,
+                                   int maxY) {
 
         load(name).thenAccept(clipboard -> {
             if (clipboard == null) return;
 
             Bukkit.getScheduler().runTask(
                     MagicStructures.getPlugin(),
-                    () -> handlePlacement(world, clipboard, x, z, biomes, blocks, name, seed, notReplaceAir, lootTableKey)
+                    () -> handlePlacement(world, clipboard, x, z, biomes, blocks, name, seed, notReplaceAir, lootTableKey, mode, minY, maxY)
             );
         });
     }
@@ -104,20 +160,27 @@ public class StructurePlacer {
                                  String name,
                                  long seed,
                                  boolean notReplaceAir,
-                                 String lootTableKey) {
+                                 String lootTableKey,
+                                 PlacementMode mode,
+                                 int minY,
+                                 int maxY) {
 
-        int y = world.getHighestBlockYAt(x, z);
-        Block ground = world.getBlockAt(x, y, z);
+        int y = resolvePlacementY(world, x, z, seed, mode, minY, maxY);
+        if (y == Integer.MIN_VALUE) {
+            return;
+        }
+
+        Block anchor = world.getBlockAt(x, y, z);
 
         if (!biomes.isEmpty()) {
-            String biome = ground.getBiome().getKey().toString();
+            String biome = anchor.getBiome().getKey().toString();
             if (!biomes.contains(biome)) {
                 return;
             }
         }
 
         if (!blocks.isEmpty()) {
-            String type = ground.getType().toString();
+            String type = anchor.getType().toString();
             if (!blocks.contains(type)) {
                 return;
             }
@@ -125,13 +188,37 @@ public class StructurePlacer {
 
         int chunkX = x >> 4;
         int chunkZ = z >> 4;
-        String key = world.getUID() + ":" + chunkX + ":" + chunkZ + ":" + name;
+        String key = world.getUID() + ":" + chunkX + ":" + chunkZ + ":" + name + ":" + mode + ":" + y;
 
         if (!placedStructures.add(key)) {
             return;
         }
 
+        //Bukkit.getLogger().info("Обнаружена структура " + name + " на координатах " + x + " " + y + " " + z);
+
         startPasteJob(world, clipboard, x, y, z, seed, notReplaceAir, lootTableKey);
+    }
+
+    private int resolvePlacementY(World world, int x, int z, long seed, PlacementMode mode, int minY, int maxY) {
+        if (mode == PlacementMode.SURFACE) {
+            return world.getHighestBlockYAt(x, z);
+        }
+
+        int worldMin = world.getMinHeight();
+        int worldMax = world.getMaxHeight() - 1;
+
+        int low = Math.max(Math.min(minY, maxY), worldMin);
+        int high = Math.min(Math.max(minY, maxY), worldMax);
+
+        if (low > high) {
+            return Integer.MIN_VALUE;
+        }
+
+        int range = high - low + 1;
+        long mixed = mixSeed(seed, x, 0, z);
+        int offset = Math.floorMod(mixed, range);
+
+        return low + offset;
     }
 
     private void startPasteJob(World world, Clipboard clipboard, int x, int y, int z,
@@ -165,7 +252,7 @@ public class StructurePlacer {
                     BlockVector3 pos = positions.get(index++);
                     BaseBlock full = clipboard.getFullBlock(pos);
 
-                    if (full.getBlockType().getMaterial().isAir() && !notReplaceAir) {
+                    if (full.getBlockType().getMaterial().isAir() && notReplaceAir) {
                         continue;
                     }
 
@@ -202,6 +289,7 @@ public class StructurePlacer {
                     }
 
                     target.setBlockData(BukkitAdapter.adapt(full), false);
+                    rotateBlockData(target, rotation);
 
                     if (target.getState() instanceof Sign sign) {
                         applySignText(sign, full);
@@ -215,7 +303,7 @@ public class StructurePlacer {
                     try {
                         checkTable(target);
                     } catch (InvalidMobTypeException e) {
-                        throw new RuntimeException(e);
+                        Bukkit.getLogger().warning("Invalid MythicMob spawn: " + e.getMessage());
                     }
 
                     processed++;
@@ -228,6 +316,23 @@ public class StructurePlacer {
         }.runTaskTimer(MagicStructures.getPlugin(), 1L, 1L);
     }
 
+    private void rotateBlockData(Block block, int rotation) {
+        if (rotation == 0) {
+            return;
+        }
+
+        BlockData data = block.getBlockData();
+        StructureRotation structureRotation = switch (rotation) {
+            case 1 -> StructureRotation.CLOCKWISE_90;
+            case 2 -> StructureRotation.CLOCKWISE_180;
+            case 3 -> StructureRotation.COUNTERCLOCKWISE_90;
+            default -> StructureRotation.NONE;
+        };
+
+        data.rotate(structureRotation);
+        block.setBlockData(data, false);
+    }
+
     private void applySignText(Sign sign, BaseBlock fullBlock) {
         try {
             LinCompoundTag nbt = fullBlock.getNbt();
@@ -235,10 +340,8 @@ public class StructurePlacer {
 
             SignSide front = sign.getSide(Side.FRONT);
 
-            // ===== MODERN (1.20+)
             LinCompoundTag frontText = nbt.findTag("front_text", LinTagType.compoundTag());
             if (frontText != null) {
-
                 LinTag listTagRaw = frontText.findTag("messages", LinTagType.listTag());
                 if (listTagRaw instanceof org.enginehub.linbus.tree.LinListTag listTag) {
 
@@ -248,10 +351,14 @@ public class StructurePlacer {
                     for (int i = 0; i < count; i++) {
                         Object obj = values.get(i);
 
-                        if (!(obj instanceof LinStringTag strTag)) continue;
+                        if (!(obj instanceof LinStringTag strTag)) {
+                            continue;
+                        }
 
                         String raw = strTag.value();
-                        if (raw == null || raw.isBlank()) continue;
+                        if (raw == null || raw.isBlank()) {
+                            continue;
+                        }
 
                         Component component;
                         try {
@@ -259,6 +366,7 @@ public class StructurePlacer {
                         } catch (Exception ex) {
                             component = Component.text(raw);
                         }
+
                         front.line(i, component);
                     }
 
@@ -267,7 +375,6 @@ public class StructurePlacer {
                 }
             }
 
-            // ===== LEGACY (старые схематики)
             for (int i = 1; i <= 4; i++) {
                 LinStringTag lineTag = nbt.findTag("Text" + i, LinTagType.stringTag());
                 if (lineTag == null) continue;
@@ -275,7 +382,13 @@ public class StructurePlacer {
                 String raw = lineTag.value();
                 if (raw == null || raw.isBlank()) continue;
 
-                Component component = GsonComponentSerializer.gson().deserialize(raw);
+                Component component;
+                try {
+                    component = GsonComponentSerializer.gson().deserialize(raw);
+                } catch (Exception ex) {
+                    component = Component.text(raw);
+                }
+
                 front.line(i - 1, component);
             }
 
@@ -325,11 +438,8 @@ public class StructurePlacer {
         if (firstLine.toLowerCase(Locale.ROOT).startsWith("[mythicmobs]")) {
 
             StringBuilder idBuilder = new StringBuilder();
-
-// первая строка (после [mythicmobs])
             idBuilder.append(firstLine.substring("[mythicmobs]".length()).trim());
 
-// остальные строки
             for (int i = 1; i < lines.size(); i++) {
                 String part = PlainTextComponentSerializer.plainText()
                         .serialize(lines.get(i))
@@ -340,13 +450,15 @@ public class StructurePlacer {
                 }
             }
 
-            String id = idBuilder.toString();
-
+            String id = idBuilder.toString().replace(" ", "");
 
             if (!id.isEmpty()) {
-                // тут твой MythicMobs spawn
-                MythicBukkit.inst().getAPIHelper().spawnMythicMob(id, block.getLocation().add(0.5, 0.0, 0.5));
+                MythicBukkit.inst().getAPIHelper().spawnMythicMob(
+                        id,
+                        block.getLocation().add(0.5, 0.0, 0.5)
+                );
             }
+
             block.setType(Material.AIR);
             return;
         }
