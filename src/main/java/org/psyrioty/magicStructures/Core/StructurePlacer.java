@@ -10,10 +10,8 @@ import com.sk89q.worldedit.world.block.BaseBlock;
 import io.lumine.mythic.api.exceptions.InvalidMobTypeException;
 import io.lumine.mythic.bukkit.MythicBukkit;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.TextComponent;
 import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
-import net.md_5.bungee.api.chat.ComponentBuilder;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.Material;
@@ -27,7 +25,6 @@ import org.bukkit.block.sign.SignSide;
 import org.bukkit.block.structure.StructureRotation;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
-import org.bukkit.entity.Player;
 import org.bukkit.loot.LootTable;
 import org.bukkit.loot.Lootable;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -64,6 +61,18 @@ public class StructurePlacer {
                          boolean notReplaceAir,
                          String lootTableKey,
                          boolean surface) {
+        populate(world, chunk, scale, threshold, biomes, blocks, fileName, distance, seed,
+                notReplaceAir, lootTableKey, surface, 0, 0);
+    }
+
+    public void populate(World world, Chunk chunk, double scale, double threshold,
+                         List<String> biomes, List<String> blocks,
+                         String fileName, int distance, long seed,
+                         boolean notReplaceAir,
+                         String lootTableKey,
+                         boolean surface,
+                         int offsetX,
+                         int offsetZ) {
 
         populateInternal(
                 world, chunk, scale, threshold,
@@ -71,7 +80,9 @@ public class StructurePlacer {
                 notReplaceAir, lootTableKey,
                 surface ? PlacementMode.SURFACE : PlacementMode.RANGE,
                 world != null ? world.getMinHeight() : 0,
-                world != null ? world.getMaxHeight() - 1 : 319
+                world != null ? world.getMaxHeight() - 1 : 319,
+                offsetX,
+                offsetZ
         );
     }
 
@@ -81,6 +92,18 @@ public class StructurePlacer {
                          boolean notReplaceAir,
                          String lootTableKey,
                          int minY, int maxY) {
+        populate(world, chunk, scale, threshold, biomes, blocks, fileName, distance, seed,
+                notReplaceAir, lootTableKey, minY, maxY, 0, 0);
+    }
+
+    public void populate(World world, Chunk chunk, double scale, double threshold,
+                         List<String> biomes, List<String> blocks,
+                         String fileName, int distance, long seed,
+                         boolean notReplaceAir,
+                         String lootTableKey,
+                         int minY, int maxY,
+                         int offsetX,
+                         int offsetZ) {
 
         populateInternal(
                 world, chunk, scale, threshold,
@@ -88,7 +111,9 @@ public class StructurePlacer {
                 notReplaceAir, lootTableKey,
                 PlacementMode.RANGE,
                 minY,
-                maxY
+                maxY,
+                offsetX,
+                offsetZ
         );
     }
 
@@ -99,7 +124,9 @@ public class StructurePlacer {
                                   String lootTableKey,
                                   PlacementMode mode,
                                   int minY,
-                                  int maxY) {
+                                  int maxY,
+                                  int offsetX,
+                                  int offsetZ) {
 
         if (world == null || chunk == null || fileName == null || fileName.isBlank() || distance <= 0) {
             return;
@@ -108,8 +135,11 @@ public class StructurePlacer {
         int chunkStartX = chunk.getX() << 4;
         int chunkStartZ = chunk.getZ() << 4;
 
-        int startX = Math.floorMod(distance - Math.floorMod(chunkStartX, distance), distance);
-        int startZ = Math.floorMod(distance - Math.floorMod(chunkStartZ, distance), distance);
+        int offX = Math.floorMod(offsetX, distance);
+        int offZ = Math.floorMod(offsetZ, distance);
+
+        int startX = Math.floorMod(offX - Math.floorMod(chunkStartX, distance), distance);
+        int startZ = Math.floorMod(offZ - Math.floorMod(chunkStartZ, distance), distance);
 
         for (int x = startX; x < 16; x += distance) {
             for (int z = startZ; z < 16; z += distance) {
@@ -125,7 +155,8 @@ public class StructurePlacer {
                             biomes, blocks,
                             fileName, seed,
                             notReplaceAir, lootTableKey,
-                            mode, minY, maxY
+                            mode, minY, maxY,
+                            offX, offZ
                     );
                 }
             }
@@ -141,14 +172,22 @@ public class StructurePlacer {
                                    String lootTableKey,
                                    PlacementMode mode,
                                    int minY,
-                                   int maxY) {
+                                   int maxY,
+                                   int offsetX,
+                                   int offsetZ) {
 
         load(name).thenAccept(clipboard -> {
             if (clipboard == null) return;
 
             Bukkit.getScheduler().runTask(
                     MagicStructures.getPlugin(),
-                    () -> handlePlacement(world, clipboard, x, z, biomes, blocks, name, seed, notReplaceAir, lootTableKey, mode, minY, maxY)
+                    () -> handlePlacement(
+                            world, clipboard, x, z,
+                            biomes, blocks, name, seed,
+                            notReplaceAir, lootTableKey,
+                            mode, minY, maxY,
+                            offsetX, offsetZ
+                    )
             );
         });
     }
@@ -163,7 +202,9 @@ public class StructurePlacer {
                                  String lootTableKey,
                                  PlacementMode mode,
                                  int minY,
-                                 int maxY) {
+                                 int maxY,
+                                 int offsetX,
+                                 int offsetZ) {
 
         int y = resolvePlacementY(world, x, z, seed, mode, minY, maxY);
         if (y == Integer.MIN_VALUE) {
@@ -188,13 +229,11 @@ public class StructurePlacer {
 
         int chunkX = x >> 4;
         int chunkZ = z >> 4;
-        String key = world.getUID() + ":" + chunkX + ":" + chunkZ + ":" + name + ":" + mode + ":" + y;
+        String key = world.getUID() + ":" + chunkX + ":" + chunkZ + ":" + name + ":" + mode + ":" + y + ":" + offsetX + ":" + offsetZ;
 
         if (!placedStructures.add(key)) {
             return;
         }
-
-        //Bukkit.getLogger().info("Обнаружена структура " + name + " на координатах " + x + " " + y + " " + z);
 
         startPasteJob(world, clipboard, x, y, z, seed, notReplaceAir, lootTableKey);
     }
@@ -344,13 +383,11 @@ public class StructurePlacer {
             if (frontText != null) {
                 LinTag listTagRaw = frontText.findTag("messages", LinTagType.listTag());
                 if (listTagRaw instanceof org.enginehub.linbus.tree.LinListTag listTag) {
-
                     var values = listTag.value();
                     int count = Math.min(4, values.size());
 
                     for (int i = 0; i < count; i++) {
                         Object obj = values.get(i);
-
                         if (!(obj instanceof LinStringTag strTag)) {
                             continue;
                         }
@@ -436,7 +473,6 @@ public class StructurePlacer {
         if (firstLine.isEmpty()) return;
 
         if (firstLine.toLowerCase(Locale.ROOT).startsWith("[mythicmobs]")) {
-
             StringBuilder idBuilder = new StringBuilder();
             idBuilder.append(firstLine.substring("[mythicmobs]".length()).trim());
 
@@ -453,13 +489,13 @@ public class StructurePlacer {
             String id = idBuilder.toString().replace(" ", "");
 
             if (!id.isEmpty()) {
+                block.setType(Material.AIR);
                 MythicBukkit.inst().getAPIHelper().spawnMythicMob(
                         id,
                         block.getLocation().add(0.5, 0.0, 0.5)
                 );
             }
 
-            block.setType(Material.AIR);
             return;
         }
 

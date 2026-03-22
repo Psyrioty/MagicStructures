@@ -54,6 +54,10 @@ public class ChunckEvents implements Listener {
             }
 
             boolean surface = config.getBoolean("surface");
+
+            int offsetX = config.getInt("offsetX");
+            int offsetZ = config.getInt("offsetZ");
+
             if(!surface){
                 int minY = config.getInt("minY");
                 int maxY = config.getInt("maxY");
@@ -71,11 +75,14 @@ public class ChunckEvents implements Listener {
                         !notReplaceAir,
                         lootTableKey,
                         minY,
-                        maxY
+                        maxY,
+                        offsetX,
+                        offsetZ
                 );
 
                 continue;
             }
+
 
             structurePlacer.populate(
                     world,
@@ -89,7 +96,9 @@ public class ChunckEvents implements Listener {
                     seed,
                     !notReplaceAir,
                     lootTableKey,
-                    surface
+                    surface,
+                    offsetX,
+                    offsetZ
             );
         }
     }
