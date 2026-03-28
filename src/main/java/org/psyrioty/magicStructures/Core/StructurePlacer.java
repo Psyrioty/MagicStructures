@@ -12,11 +12,7 @@ import io.lumine.mythic.bukkit.MythicBukkit;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
-import org.bukkit.Bukkit;
-import org.bukkit.Chunk;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.World;
+import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.block.Sign;
 import org.bukkit.block.data.BlockData;
@@ -340,8 +336,12 @@ public class StructurePlacer {
                     }
 
                     try {
-                        checkTable(target);
-                    } catch (InvalidMobTypeException e) {
+                        if(MagicStructures.getPlugin().isMythicMobs()) {
+                            checkTableMythic(target);
+                        }else{
+                            checkTable(target);
+                        }
+                    } catch (Exception e) {
                         Bukkit.getLogger().warning("Invalid MythicMob spawn: " + e.getMessage());
                     }
 
@@ -457,7 +457,62 @@ public class StructurePlacer {
         state.update(true, false);
     }
 
-    private void checkTable(Block block) throws InvalidMobTypeException {
+
+    private void checkTableMythic(Block block) throws InvalidMobTypeException {
+        org.bukkit.block.BlockState state = block.getState();
+        if (!(state instanceof Sign sign)) {
+            return;
+        }
+
+        var lines = sign.getSide(Side.FRONT).lines();
+        if (lines.isEmpty()) return;
+
+        String firstLine = PlainTextComponentSerializer.plainText()
+                .serialize(lines.get(0))
+                .trim();
+
+        if (firstLine.isEmpty()) return;
+
+        if (firstLine.toLowerCase(Locale.ROOT).startsWith("[mythicmobs]")) {
+            StringBuilder idBuilder = new StringBuilder();
+            idBuilder.append(firstLine.substring("[mythicmobs]".length()).trim());
+
+            for (int i = 1; i < lines.size(); i++) {
+                String part = PlainTextComponentSerializer.plainText()
+                        .serialize(lines.get(i))
+                        .trim();
+
+                if (!part.isEmpty()) {
+                    idBuilder.append(part);
+                }
+            }
+
+            String id = idBuilder.toString().replace(" ", "");
+
+                if (!id.isEmpty()) {
+                    block.setType(Material.AIR);
+                        spawnMythicMob(id, block);
+                }
+
+            return;
+        }
+
+        try {
+            EntityType type = EntityType.valueOf(firstLine.toUpperCase(Locale.ROOT));
+
+            if (type.isSpawnable()) {
+                Entity entity = block.getWorld().spawnEntity(
+                        block.getLocation().add(0.5, 0.0, 0.5),
+                        type
+                );
+                entity.setPersistent(true);
+                block.setType(Material.AIR);
+            }
+        } catch (IllegalArgumentException ignored) {
+        }
+    }
+
+    private void checkTable(Block block) {
         org.bukkit.block.BlockState state = block.getState();
         if (!(state instanceof Sign sign)) {
             return;
@@ -490,10 +545,6 @@ public class StructurePlacer {
 
             if (!id.isEmpty()) {
                 block.setType(Material.AIR);
-                MythicBukkit.inst().getAPIHelper().spawnMythicMob(
-                        id,
-                        block.getLocation().add(0.5, 0.0, 0.5)
-                );
             }
 
             return;
@@ -528,6 +579,13 @@ public class StructurePlacer {
         h ^= (long) y * 132897987541L;
         h ^= (long) z * 42317861L;
         return h;
+    }
+
+    private void spawnMythicMob(String id, Block block) throws InvalidMobTypeException {
+        MythicBukkit.inst().getAPIHelper().spawnMythicMob(
+                id,
+                block.getLocation().add(0.5, 0.0, 0.5)
+        );
     }
 
     private CompletableFuture<Clipboard> load(String name) {

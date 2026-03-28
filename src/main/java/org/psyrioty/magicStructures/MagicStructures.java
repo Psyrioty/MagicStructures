@@ -19,12 +19,14 @@ public final class MagicStructures extends JavaPlugin {
     PluginManager pm;
     HashMap<YamlConfiguration, File> structures = new HashMap<>();
     StructurePlacer structurePlacer;
+    boolean mythicMobs = false;
 
     @Override
     public void onEnable() {
         plugin = this;
         pm = Bukkit.getPluginManager();
         pm.registerEvents(new ChunckEvents(), this);
+        mythicMobs = Bukkit.getPluginManager().isPluginEnabled("MythicMobs");
 
         try {
             //saveResource("structures/test_astral_mushroom.schem", false);
@@ -40,6 +42,10 @@ public final class MagicStructures extends JavaPlugin {
     @Override
     public void onDisable() {
         // Plugin shutdown logic
+    }
+
+    public boolean isMythicMobs() {
+        return mythicMobs;
     }
 
     public static MagicStructures getPlugin() {
