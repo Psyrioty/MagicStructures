@@ -1,5 +1,5 @@
 name: MagicStructures
-version: '1.1'
+version: '1.2'
 main: org.psyrioty.magicStructures.MagicStructures
-api-version: '1.21'
+api-version: '26.1'
 softdepend: [FastAsyncWorldEdit, MythicMobs]
